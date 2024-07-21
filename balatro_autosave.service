@@ -1,0 +1,14 @@
+[Unit]
+Description=Balatro ADB Autosave Service
+After=multi-user.target
+
+[Service]
+Type=idle
+Restart=on-failure
+User=your_user
+ExecStart=/bin/bash -c 'cd path/to/this/folder && source .venv/bin/activate && python main.py'
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

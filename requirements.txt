@@ -1,0 +1,8 @@
+adb_shell==0.4.4
+cffi==1.16.0
+cryptography==43.0.0
+icmplib==3.0.4
+pyasn1==0.6.0
+pycparser==2.22
+python-dotenv==1.0.1
+rsa==4.9
