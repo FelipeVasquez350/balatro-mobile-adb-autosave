@@ -13,3 +13,6 @@ The following procedures require leaving `Wireless Debugging` ***allowed*** all 
 - Android device with developer options -> Wireless Debugging enabled (first attempt requires USB debugging)
 
 See [SETUP.md](SETUP.md) for more information
+
+## Usecase
+https://github.com/user-attachments/assets/b22b98cc-ddd6-41ca-8347-572f4ff58517
