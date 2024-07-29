@@ -1,0 +1,14 @@
+version: "3.8"
+
+services:
+  balatro-mobile-adb-autosave:
+    image: ghcr.io/felipevasquez350/balatro-mobile-adb-autosave:latest
+    container_name: balatro-mobile-adb-autosave
+    restart: unless-stopped
+    volumes:
+      - /absolute/path/to/folder:/adbkeys
+      - /absolute/path/to/folder:/Balatro
+      - /absolute/path/to/folder:/BalatroBackups
+    environment:
+      - MOBILE_IP= X.X.X.X
+      - ALLOW_BACKUPS=False

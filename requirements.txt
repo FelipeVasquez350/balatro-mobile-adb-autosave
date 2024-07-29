@@ -1,8 +1,14 @@
 adb_shell==0.4.4
+altgraph==0.17.4
 cffi==1.16.0
 cryptography==43.0.0
 icmplib==3.0.4
+libusb1==3.1.0
+packaging==24.1
 pyasn1==0.6.0
 pycparser==2.22
+pyinstaller==6.9.0
+pyinstaller-hooks-contrib==2024.7
 python-dotenv==1.0.1
 rsa==4.9
+setuptools==71.1.0

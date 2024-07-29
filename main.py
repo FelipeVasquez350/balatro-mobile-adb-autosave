@@ -10,6 +10,7 @@ from adb_shell.auth.sign_pythonrsa import PythonRSASigner
 from adb_shell.auth.keygen import keygen
 from icmplib import ping
 from icmplib.exceptions import NameLookupError
+from sys import exit
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -17,18 +18,40 @@ logger = logging.getLogger(__name__)
 logger.info("Balatro Sync started.")
 
 load_dotenv()
-MOBILE_IP=
-TMP_PATH=
-ADB_KEYS_PATH=
-GAME_PATH=
-MOBILE_TMP_PATH= "/data/local/tmp/balatro"
+MOBILE_IP= os.getenv("MOBILE_IP","")
+ADB_KEYS_PATH= os.getenv("ADB_KEYS_PATH","")
+SAVE_PATH= os.getenv("SAVE_PATH","")
+ALLOW_BACKUPS= bool(os.getenv("ALLOW_BACKUPS", False))
+BACKUP_PATH= os.getenv("BACKUP_PATH","")
 
-def __init__():
+
+
+def init():
     success = False
-    if MOBILE_IP == None:
-        logger.info("Please set the MOBILE_IP environment variable")
-        return
+
     logger.info("Initializing")
+    logger.info("Checking environment variables")
+
+    if MOBILE_IP == None:
+        logger.error("Please set the MOBILE_IP environment variable")
+        exit(1)
+
+    if SAVE_PATH and not os.path.exists(SAVE_PATH):
+        logger.error(f"Game path does not exist at {SAVE_PATH}. Exiting.")
+        exit(1)
+
+    if ADB_KEYS_PATH and not os.path.exists(ADB_KEYS_PATH):
+        logger.error("ADB keys path does not exist. Exiting.")
+        exit(1)
+
+    if not os.path.exists(f"{ADB_KEYS_PATH}/adbkey"):
+        logger.error("Generating a public/private key pair")
+        keygen(f"{ADB_KEYS_PATH}/adbkey")
+
+    if ALLOW_BACKUPS and BACKUP_PATH and not os.path.exists(BACKUP_PATH):
+        logger.error("Backup path does not exist. Exiting.")
+        exit(1)
+
     while not success:
         if is_device_online(MOBILE_IP):
             try:
@@ -37,11 +60,12 @@ def __init__():
                 else:
                     logger.info("Error connecting to device. Retrying...")
             except Exception as e:
-                logger.info(f"Error: {e}")
+                logger.error(f"Error: {e}")
         else:
-            logger.info("Device not online. Retrying in 5 seconds")
-            time.sleep
+            logger.info("Device not online. Retrying in 30 seconds")
+            time.sleep(30)
     logger.info("Initialization complete")
+
 
 
 def is_device_online(ip):
@@ -54,14 +78,9 @@ def is_device_online(ip):
 
 
 def connect_device():
-    if not os.path.exists(ADB_KEYS_PATH):
-        os.makedirs(ADB_KEYS_PATH)
-        logger.info("Generating a public/private key pair")
-        keygen(f"{ADB_KEYS_PATH}/adbkey")
-
     with open(f"{ADB_KEYS_PATH}/adbkey") as f:
         priv = f.read()
-    with open(f"{ADB_KEYS_PATH}/adbkey" + '.pub') as f:
+    with open(f"{ADB_KEYS_PATH}/adbkey.pub") as f:
         pub = f.read()
     signer = PythonRSASigner(pub, priv)
 
@@ -72,140 +91,127 @@ def connect_device():
     return device
 
 
-def transfer_pc_to_mobile(device):
-    local_user = os.popen("whoami").read().strip()
 
-    device.shell(f"mkdir {MOBILE_TMP_PATH}")
-    device.shell(f"mkdir {MOBILE_TMP_PATH}/files")
-    device.shell(f"mkdir {MOBILE_TMP_PATH}/files/save")
-    device.shell(f"mkdir {MOBILE_TMP_PATH}/files/save/game")
+def transfer_pc_to_mobile(profile: int):
+    device = connect_device()
 
     logger.info("Transferring PC data to mobile")
-    files = os.listdir(GAME_PATH)
+    device.shell(f"mkdir /data/local/tmp/balatro")
 
-    def push_files(device, dir):
-        for file in os.listdir(dir):
-            if os.path.isdir(f"{dir}/{file}"):
-                push_files(device, f"{dir}/{file}")
-            elif file != "steam_autocloud.vdf":
-                path = dir.replace(GAME_PATH,"")
-                device.push(f"{dir}/{file}", f"{MOBILE_TMP_PATH}/files/save/game/{path}/{file}")
+    profile_files = f"{SAVE_PATH}/{profile}"
 
+    for file in os.listdir(profile_files):
+        logger.info(f"Pushing {file} to /data/local/tmp/balatro/{profile}/{file}")
+        device.push(f"{profile_files}/{file}", f"/data/local/tmp/balatro/{profile}/{file}")
 
-    push_files(device, GAME_PATH)
+    logger.info("Pushing settings.jkr to /data/local/tmp/balatro/settings.jkr")
+    device.push(f"{SAVE_PATH}/settings.jkr", "/data/local/tmp/balatro/settings.jkr")
 
     device.shell("am force-stop com.unofficial.balatro")
-    device.shell(f"run-as com.unofficial.balatro cp -r {MOBILE_TMP_PATH}/files .")
-    device.shell(f"rm -r {MOBILE_TMP_PATH}")
+    device.shell(f"run-as com.unofficial.balatro cp -r /data/local/tmp/balatro/* ./files/save/game/")
+    device.shell(f"rm -r /data/local/tmp/balatro/")
 
     logger.info("PC data transferred to mobile")
     return
 
 
-def transfer_mobile_to_pc(device):
-    device.shell(f"rm -r {MOBILE_TMP_PATH}")
-    device.shell(f"mkdir {MOBILE_TMP_PATH}")
-    device.shell(f"mkdir {MOBILE_TMP_PATH}/files")
-    device.shell(f"mkdir {MOBILE_TMP_PATH}/files/1")
 
-    device.shell(f"run-as com.unofficial.balatro cat files/save/game/settings.jkr > {MOBILE_TMP_PATH}/files/settings.jkr")
-    device.shell(f"touch {MOBILE_TMP_PATH}/files/1/profile.jkr")
-    device.shell(f"run-as com.unofficial.balatro cat files/save/game/1/profile.jkr > {MOBILE_TMP_PATH}/files/1/profile.jkr")
-    device.shell(f"touch {MOBILE_TMP_PATH}/files/1/meta.jkr")
-    device.shell(f"run-as com.unofficial.balatro cat files/save/game/1/meta.jkr > {MOBILE_TMP_PATH}/files/1/meta.jkr")
-    device.shell(f"touch {MOBILE_TMP_PATH}/files/1/save.jkr")
-    device.shell(f"run-as com.unofficial.balatro cat files/save/game/1/save.jkr > {MOBILE_TMP_PATH}/files/1/save.jkr")
-    device.shell(f"find {MOBILE_TMP_PATH}/files/ -maxdepth 2 -size 0c -exec rm '{"{}"}' \\;")
+def transfer_mobile_to_pc(profile: int):
+    device = connect_device()
 
-    local_user = os.popen("whoami").read().strip()
+    files = (
+        "settings.jkr",
+        f"{profile}/profile.jkr",
+        f"{profile}/meta.jkr",
+        f"{profile}/save.jkr",
+    )
 
-    def pull_files(device, dir):
-        list = device.list(dir)
-        for file in list:
-            if file.filename.decode('utf-8') != "." and file.filename.decode('utf-8') != "..":
-                logger.info(f"Pulling {dir}{file.filename.decode('utf-8')}")
-                is_dir = device.shell(f"[ -d {dir}{file.filename.decode('utf-8')} ] && echo 1 || echo 0")
-                if is_dir == "1\n":
-                    logger.info(f"{file.filename.decode('utf-8')} is a directory")
-                    pull_files(device, f"{dir}{file.filename.decode('utf-8')}/")
-                else:
-                    path = dir.replace(f"{MOBILE_TMP_PATH}/files/","")
+    data = {}
 
-                    if not os.path.exists(f"{GAME_PATH}/{path}"):
-                        os.makedirs(f"{GAME_PATH}/{path}")
-                    device.pull(f"{dir}{file.filename.decode('utf-8')}", f"{GAME_PATH}/{path}{file.filename.decode('utf-8')}")
+    for file in files:
+        data[file] = device.exec_out(f"run-as com.unofficial.balatro cat files/save/game/{file}", decode=False)
 
-    if os.path.exists(f"{GAME_PATH}"):
-        pull_files(device, f"{MOBILE_TMP_PATH}/files/")
-        logger.info("Mobile data transferred to PC")
-        device.shell(f"rm -r {MOBILE_TMP_PATH}")
-        return True
+        if b"No such file or directory" in data[file]:
+            continue
 
-    device.shell(f"rm -r {MOBILE_TMP_PATH}")
-    logger.info("Mobile data DID NOT transfer to PC")
+        try:
+            if not os.path.exists(f"{SAVE_PATH}/{profile}"):
+                os.makedirs(f"{SAVE_PATH}/{profile}")
+                logger.info(f"Creating directory {SAVE_PATH}/{profile}")
+            with open(f"{SAVE_PATH}/{file}", "wb") as f:
+                f.write(data[file])
+                logger.error(f"Writing file {SAVE_PATH}/{file}")
+        except Exception as e:
+            logger.info("Error writing file:", e)
 
-    return False
+    logger.info("Mobile data transferred to PC")
+    return
+
 
 
 def backup_pc():
-    local_user = os.popen("whoami").read().strip()
-    if os.path.exists(GAME_PATH):
-        current_date = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        os.mkdir(f"{GAME_PATH}Backup-{current_date}")
+    if ALLOW_BACKUPS == False:
+        return True
 
-        os.system(f"cp -r {GAME_PATH} {GAME_PATH}Backup-{current_date}/")
+    if os.path.exists(BACKUP_PATH):
+        current_date = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        os.mkdir(f"{BACKUP_PATH}/PCBackup-{current_date}")
+
+        os.system(f"cp -r {SAVE_PATH}/* {BACKUP_PATH}/PCBackup-{current_date}/")
 
         logger.info("PC data backed up")
         return True
+    else:
+        logger.error("Backup path does not exist")
     return False
 
 
+
 def backup_mobile():
-    device = connect_device()
-    local_user = os.popen("whoami").read().strip()
+    if ALLOW_BACKUPS == False:
+        return True
 
-    current_date = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    if os.path.exists(GAME_PATH):
-        os.mkdir(f"{GAME_PATH}MobileBackup-{current_date}")
+    if os.path.exists(BACKUP_PATH):
+        device = connect_device()
+        current_date = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        os.mkdir(f"{BACKUP_PATH}/MobileBackup-{current_date}")
 
-        device.shell(f"rm -r {MOBILE_TMP_PATH}")
-        device.shell(f"mkdir {MOBILE_TMP_PATH}")
-        device.shell(f"mkdir {MOBILE_TMP_PATH}/files")
-        device.shell(f"mkdir {MOBILE_TMP_PATH}/files/1/")
+        # Credit at https://gist.github.com/vanchaxy/5a9915cbeae2d95a52f671b4502a0f6d for making me discover the existence `exec_out` and this easier way to pull files
+        files =  [
+            "settings.jkr",
+            "1/profile.jkr",
+            "1/meta.jkr",
+            "1/save.jkr",
+            "2/profile.jkr",
+            "2/meta.jkr",
+            "2/save.jkr",
+            "3/profile.jkr",
+            "3/meta.jkr",
+            "3/save.jkr",
+        ]
 
-        device.shell(f"run-as com.unofficial.balatro cat files/save/game/settings.jkr > {MOBILE_TMP_PATH}/files/settings.jkr")
-        device.shell(f"touch {MOBILE_TMP_PATH}/files/1/profile.jkr")
-        device.shell(f"run-as com.unofficial.balatro cat files/save/game/1/profile.jkr > {MOBILE_TMP_PATH}/files/1/profile.jkr")
-        device.shell(f"touch {MOBILE_TMP_PATH}/files/1/meta.jkr")
-        device.shell(f"run-as com.unofficial.balatro cat files/save/game/1/meta.jkr > {MOBILE_TMP_PATH}/files/1/meta.jkr")
-        device.shell(f"touch {MOBILE_TMP_PATH}/files/1/save.jkr")
-        device.shell(f"run-as com.unofficial.balatro cat files/save/game/1/save.jkr > {MOBILE_TMP_PATH}/files/1/save.jkr")
-        device.shell(f"find {MOBILE_TMP_PATH}/files/ -maxdepth 2 -size 0c -exec rm '{"{}"}' \\;")
+        data = {}
 
-        def pull_files(device, dir):
-            list = device.list(dir)
-            for file in list:
-                if file.filename.decode('utf-8') != "." and file.filename.decode('utf-8') != "..":
-                    logger.info(f"Pulling {dir}{file.filename.decode('utf-8')}")
-                    is_dir = device.shell(f"[ -d {dir}{file.filename.decode('utf-8')} ] && echo 1 || echo 0")
-                    if is_dir == "1\n":
-                        logger.info(f"{file.filename.decode('utf-8')} is a directory")
-                        pull_files(device, f"{dir}{file.filename.decode('utf-8')}/")
-                    else:
-                        path = dir.replace(f"{MOBILE_TMP_PATH}/files/","")
+        for file in files:
+            data[file] = device.exec_out(f"run-as com.unofficial.balatro cat files/save/game/{file}", decode=False)
 
-                        if not os.path.exists(f"{GAME_PATH}MobileBackup-{current_date}/{path}"):
-                            os.makedirs(f"{GAME_PATH}MobileBackup-{current_date}/{path}")
-                        device.pull(f"{dir}{file.filename.decode('utf-8')}", f"{GAME_PATH}MobileBackup-{current_date}/{path}{file.filename.decode('utf-8')}")
+            if b"No such file or directory" in data[file]:
+                continue
 
-        pull_files(device, f"{MOBILE_TMP_PATH}/files/")
-
-        device.shell(f"rm -r {MOBILE_TMP_PATH}")
+            try:
+                dir = file.split("/")[0]
+                if dir.isdigit() and not os.path.exists(f"{BACKUP_PATH}/MobileBackup-{current_date}/{dir}"):
+                    os.makedirs(f"{BACKUP_PATH}/MobileBackup-{current_date}/{dir}")
+                with open(f"{BACKUP_PATH}/MobileBackup-{current_date}/{file}", "wb") as f:
+                    f.write(data[file])
+            except Exception as e:
+                logger.error("Error writing file:", e)
 
         logger.info("Mobile data backed up")
 
         return True
     return False
+
 
 
 def read_file_as_bytes(file_path):
@@ -214,89 +220,93 @@ def read_file_as_bytes(file_path):
             data = file.read()
         return data
     except Exception as e:
-        logger.info("Error reading file:", e)
+        logger.error("Error reading file:", e)
         return None
 
-
-def decompress_data_deflate(data):
-    try:
-        decompressed_data = zlib.decompress(data, -zlib.MAX_WBITS)
-        return decompressed_data
-    except Exception as e:
-        logger.info("Error decompressing deflate data:", e)
-        return None
-
-
-def obtain_cards_played(file_path):
-    file_data = read_file_as_bytes(file_path)
-
-    if file_data:
-        decompressed_data = decompress_data_deflate(file_data)
-
-        if decompressed_data:
-            pattern = r'"c_cards_played"]=\s*(\d+)'
-
-            match = re.search(pattern, decompressed_data.decode('utf-8'))
-
-            if match:
-                cards_played = int(match.group(1))
-                return cards_played
-            else:
-                logger.info("Key not found.")
-                return None
-
-        else:
-            logger.info("Failed to decompress data.")
-            return None
-    else:
-        logger.info("Failed to read file.")
-        return None
 
 
 def sync():
-    local_user = os.popen("whoami").read().strip()
-    pc_profile_path = f"{GAME_PATH}/1/profile.jkr"
+    # Checks for all 3 profiles
+    for i in range(1,4):
+        mobile_profile_exists = True
+        mobile_cards_played = -1
 
-    device = connect_device()
-    device.shell(f"mkdir {MOBILE_TMP_PATH}")
-    device.shell(f"run-as com.unofficial.balatro cat files/save/game/1/profile.jkr > {MOBILE_TMP_PATH}/profile.jkr")
+        # Mobile
+        device = connect_device()
+        mobile_profile_bytes: bytes
+        output = device.exec_out(f"run-as com.unofficial.balatro cat files/save/game/{i}/profile.jkr", decode=False)
 
-    if not os.path.exists(TMP_PATH):
-        os.makedirs(TMP_PATH)
-
-    device.pull(f"{MOBILE_TMP_PATH}/profile.jkr", f"{TMP_PATH}/profile.jkr")
-    device.shell(f"rm -r {MOBILE_TMP_PATH}")
-
-    mobile_profile_path = f"{TMP_PATH}/profile.jkr"
-    pc_profile_path = f"{GAME_PATH}/1/profile.jkr"
-
-    mobile_cards_played = obtain_cards_played(mobile_profile_path)
-    pc_cards_played = obtain_cards_played(pc_profile_path)
-
-    os.remove(mobile_profile_path)
-
-    logger.info(f"Mobile cards played: {mobile_cards_played}")
-    logger.info(f"PC cards played: {pc_cards_played}")
-
-    if mobile_cards_played == None or pc_cards_played == None:
-        logger.info("Failed to obtain the cards played.")
-        return
-
-    if pc_cards_played < mobile_cards_played:
-        logger.info("The mobile data is older.")
-        if backup_pc():
-            transfer_mobile_to_pc(connect_device())
+        if isinstance(output, str):
+            mobile_profile_bytes = output.encode('utf-8')
         else:
-            logger.info("Failed to backup pc data.")
-    elif pc_cards_played > mobile_cards_played:
-        logger.info("The pc data is older.")
-        if backup_mobile():
-            transfer_pc_to_mobile(connect_device())
+            if output == f"cat: files/save/game/{i}/profile.jkr: No such file or directory\n".encode('utf-8'):
+                logger.warning(f"Mobile profile {i} not found.")
+                mobile_profile_exists = False
+            mobile_profile_bytes = output
+
+        if mobile_profile_exists:
+            mobile_profile = zlib.decompress(mobile_profile_bytes, -zlib.MAX_WBITS)
+            match = re.search(r'"c_cards_played"]=\s*(\d+)', mobile_profile.decode('utf-8'))
+
+            if match:
+                mobile_cards_played = int(match.group(1))
+            else:
+                logger.warning(f"Cards played not found for mobile profile n°{i}.")
+
+        # PC
+        pc_profile_exists = False
+        pc_cards_played = -1
+        pc_profile_path = f"{SAVE_PATH}/{i}/profile.jkr"
+
+        if os.path.exists(pc_profile_path):
+            pc_profile_bytes = read_file_as_bytes(pc_profile_path)
+            if pc_profile_bytes:
+                pc_profile_exists = True
+                pc_profile = zlib.decompress(pc_profile_bytes, -zlib.MAX_WBITS)
+                match = re.search(r'"c_cards_played"]=\s*(\d+)', pc_profile.decode('utf-8'))
+                if match:
+                    pc_cards_played = int(match.group(1))
+                else:
+                    logger.warning(f"Cards played not found for PC profile n°{i}.")
+            else:
+                logger.error(f"Failed to read PC profile {i}.")
         else:
-            logger.info("Failed to backup mobile data.")
-    else:
-        logger.info("Both devices have the same data. (in terms of the cards played)")
+            logger.warning(f"PC profile {i} not found.")
+
+
+        # Compare
+
+        if mobile_profile_exists and mobile_cards_played == -1:
+            logger.warning(f"Failed to obtain the cards played for mobile profile n°{i}.")
+            continue
+
+        if pc_profile_exists and pc_cards_played == -1:
+            logger.warning(f"Failed to obtain the cards played for pc profile n°{i}.")
+            continue
+
+        if not mobile_profile_exists and not pc_profile_exists:
+            logger.info(f"Profile n°{i} not found on either devices.")
+            continue
+
+        logger.info(f"Mobile cards played: {mobile_cards_played}")
+        logger.info(f"PC cards played: {pc_cards_played}")
+
+        if pc_cards_played < mobile_cards_played:
+            logger.info(f"The mobile data is older for profile n°{i}.")
+            if backup_pc():
+                transfer_mobile_to_pc(i)
+            else:
+                logger.error(f"Failed to backup pc data for profile n°{i}.")
+        elif pc_cards_played > mobile_cards_played:
+            logger.info("The pc data is older.")
+            if backup_mobile():
+                transfer_pc_to_mobile(i)
+            else:
+                logger.error("Failed to backup mobile data.")
+        else:
+            logger.info(f"Both devices have the same data for profile n°{i}.")
     return
+
 
 
 def main():
@@ -306,9 +316,10 @@ def main():
             sync()
         else:
             logger.info(f"{MOBILE_IP} is offline.")
-        time.sleep(60)
+        time.sleep(300)
+
 
 
 if __name__ == "__main__":
-    __init__()
+    init()
     main()
